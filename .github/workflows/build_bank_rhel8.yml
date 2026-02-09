@@ -1,4 +1,4 @@
-name: Build for Bank (RHEL8/GLIBC2.28)
+name: Build for Bank (RHEL8/GLIBC2.28/GCC11)
 
 on:
   workflow_dispatch:
@@ -27,19 +27,26 @@ jobs:
     
     container:
       image: nvidia/cuda:12.6.0-devel-ubi8
-      options: --user root  # 确保有权限清理文件
+      options: --user root
       
     steps:
-      - name: 1. Install System Tools
+      - name: 1. Install GCC 11 & Tools
         run: |
-          dnf install -y git wget tar gzip gcc gcc-c++ which
-          dnf clean all  # 清理 dnf 缓存
+          # 安装基础工具
+          dnf install -y git wget tar gzip which
           
+          # ★★★ 关键修复 ★★★
+          # 安装 GCC Toolset 11 (提供 GCC 11.2)，解决 PyTorch 2.x 需要 GCC 9+ 的问题
+          dnf install -y gcc-toolset-11
+          
+          # 清理缓存释放空间
+          dnf clean all
+
       - name: 2. Install Miniconda
         run: |
           wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
           bash miniconda.sh -b -p /opt/miniconda
-          rm miniconda.sh  # 删除安装包释放空间
+          rm miniconda.sh
           echo "/opt/miniconda/bin" >> $GITHUB_PATH
 
       - name: 3. Setup Python & PyTorch
@@ -49,14 +56,10 @@ jobs:
           conda activate build_env
           
           echo "Installing PyTorch ${{ inputs.torch_version }}..."
-          
-          # 安装 PyTorch
           pip install torch==${{ inputs.torch_version }} --index-url https://download.pytorch.org/whl/cu${{ inputs.cuda_version }}
-          
-          # 安装构建工具
           pip install packaging ninja wheel setuptools
           
-          # ★★★ 关键操作：清理 pip 缓存以释放数 GB 空间 ★★★
+          # 清理 pip 缓存防止磁盘爆满
           pip cache purge
           rm -rf ~/.cache/pip
 
@@ -65,7 +68,7 @@ jobs:
         with:
           ref: ${{ inputs.git_ref }}
 
-      - name: 5. Build Wheel (Local Compile)
+      - name: 5. Build Wheel (GCC 11 Enabled)
         env:
           MAMBA_FORCE_BUILD: "TRUE"
           MAMBA_FORCE_CXX11_ABI: "FALSE"
@@ -73,11 +76,16 @@ jobs:
         run: |
           source /opt/miniconda/bin/activate build_env
           
-          echo "Starting build..."
+          # ★★★ 激活 GCC 11 环境 ★★★
+          # 必须在这一步 source，否则找不到新版 gcc
+          source /opt/rh/gcc-toolset-11/enable
+          
+          echo "Checking Compiler Versions:"
+          gcc --version
           nvcc --version
           
-          # ★★★ 关键修改：添加 --no-build-isolation ★★★
-          # 这告诉 pip：直接使用当前环境（build_env）里的 PyTorch，不要再去创建一个临时环境重装一遍
+          echo "Starting Build..."
+          # --no-build-isolation: 复用当前环境
           pip wheel . --no-deps --no-build-isolation -w dist/ --verbose
 
       - name: 6. Verify and Upload
@@ -88,5 +96,5 @@ jobs:
       - name: 7. Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mamba-bank-rhel8-wheel
+          name: mamba-bank-rhel8-gcc11-wheel
           path: dist/*.whl

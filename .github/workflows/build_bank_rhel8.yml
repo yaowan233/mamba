@@ -78,7 +78,7 @@ jobs:
       - name: 5. Build Wheel (GCC 12 Enabled)
         env:
           MAMBA_FORCE_BUILD: "TRUE"
-          MAMBA_FORCE_CXX11_ABI: "FALSE"
+          MAMBA_FORCE_CXX11_ABI: "TRUE"
           TORCH_CUDA_ARCH_LIST: "7.0"
         run: |
           source /opt/miniconda/bin/activate build_env

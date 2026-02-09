@@ -1,4 +1,4 @@
-name: Build for Bank (RHEL8/GLIBC2.28/GCC11) - FINAL
+name: Build for Bank (RHEL8/GLIBC2.28/GCC12) - FIXED
 
 on:
   workflow_dispatch:
@@ -30,17 +30,23 @@ jobs:
       options: --user root
       
     steps:
-      - name: 1. Enable CRB Repo & Install GCC 11
+      - name: 1. Enable Repos & Install GCC 12
         run: |
-          # ★★★ 关键修复 ★★★
-          # 启用 CodeReady Builder (CRB) 仓库，否则找不到 gcc-toolset
+          # 安装配置工具
           dnf install -y 'dnf-command(config-manager)'
-          dnf config-manager --set-enabled crb
           
-          # 现在可以安装 GCC 11 和其他工具了
-          dnf install -y gcc-toolset-11 git wget tar gzip which
+          # ★★★ 关键修改 1：使用正确的 UBI 仓库名称 ★★★
+          # 尝试启用 ubi-8-codeready-builder (UBI的标准名称)
+          dnf config-manager --set-enabled ubi-8-codeready-builder || echo "Repo enable failed, trying to continue..."
           
-          # 清理缓存释放空间
+          # 基础工具
+          dnf install -y git wget tar gzip which
+          
+          # ★★★ 关键修改 2：改用 gcc-toolset-12 ★★★
+          # 如果 11 找不到，就用 12。GCC 12 完美支持 C++17，兼容 PyTorch 2.x
+          dnf install -y gcc-toolset-12 || dnf install -y gcc-toolset-11
+          
+          # 清理缓存
           dnf clean all
 
       - name: 2. Install Miniconda
@@ -60,6 +66,7 @@ jobs:
           pip install torch==${{ inputs.torch_version }} --index-url https://download.pytorch.org/whl/cu${{ inputs.cuda_version }}
           pip install packaging ninja wheel setuptools
           
+          # 清理 pip 缓存
           pip cache purge
           rm -rf ~/.cache/pip
 
@@ -68,7 +75,7 @@ jobs:
         with:
           ref: ${{ inputs.git_ref }}
 
-      - name: 5. Build Wheel (GCC 11 Enabled)
+      - name: 5. Build Wheel (GCC 12 Enabled)
         env:
           MAMBA_FORCE_BUILD: "TRUE"
           MAMBA_FORCE_CXX11_ABI: "FALSE"
@@ -76,8 +83,13 @@ jobs:
         run: |
           source /opt/miniconda/bin/activate build_env
           
-          # 激活 GCC 11 环境
-          source /opt/rh/gcc-toolset-11/enable
+          # ★★★ 关键修改 3：激活 GCC 12 ★★★
+          # 优先尝试激活 12，如果没装 12 则尝试 11
+          if [ -f /opt/rh/gcc-toolset-12/enable ]; then
+            source /opt/rh/gcc-toolset-12/enable
+          else
+            source /opt/rh/gcc-toolset-11/enable
+          fi
           
           echo "Checking Compiler Versions:"
           gcc --version

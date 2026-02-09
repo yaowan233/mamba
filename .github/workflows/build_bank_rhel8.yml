@@ -1,4 +1,4 @@
-name: Build for Bank (RHEL8/GLIBC2.28/GCC11)
+name: Build for Bank (RHEL8/GLIBC2.28/GCC11) - FINAL
 
 on:
   workflow_dispatch:
@@ -30,14 +30,15 @@ jobs:
       options: --user root
       
     steps:
-      - name: 1. Install GCC 11 & Tools
+      - name: 1. Enable CRB Repo & Install GCC 11
         run: |
-          # 安装基础工具
-          dnf install -y git wget tar gzip which
-          
           # ★★★ 关键修复 ★★★
-          # 安装 GCC Toolset 11 (提供 GCC 11.2)，解决 PyTorch 2.x 需要 GCC 9+ 的问题
-          dnf install -y gcc-toolset-11
+          # 启用 CodeReady Builder (CRB) 仓库，否则找不到 gcc-toolset
+          dnf install -y 'dnf-command(config-manager)'
+          dnf config-manager --set-enabled crb
+          
+          # 现在可以安装 GCC 11 和其他工具了
+          dnf install -y gcc-toolset-11 git wget tar gzip which
           
           # 清理缓存释放空间
           dnf clean all
@@ -59,7 +60,6 @@ jobs:
           pip install torch==${{ inputs.torch_version }} --index-url https://download.pytorch.org/whl/cu${{ inputs.cuda_version }}
           pip install packaging ninja wheel setuptools
           
-          # 清理 pip 缓存防止磁盘爆满
           pip cache purge
           rm -rf ~/.cache/pip
 
@@ -76,8 +76,7 @@ jobs:
         run: |
           source /opt/miniconda/bin/activate build_env
           
-          # ★★★ 激活 GCC 11 环境 ★★★
-          # 必须在这一步 source，否则找不到新版 gcc
+          # 激活 GCC 11 环境
           source /opt/rh/gcc-toolset-11/enable
           
           echo "Checking Compiler Versions:"
@@ -85,7 +84,6 @@ jobs:
           nvcc --version
           
           echo "Starting Build..."
-          # --no-build-isolation: 复用当前环境
           pip wheel . --no-deps --no-build-isolation -w dist/ --verbose
 
       - name: 6. Verify and Upload
@@ -96,5 +94,5 @@ jobs:
       - name: 7. Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mamba-bank-rhel8-gcc11-wheel
+          name: mamba-bank-rhel8-final-wheel
           path: dist/*.whl
